@@ -1,0 +1,140 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates
+  templates:
+    - uuid: bd0ddb0684804fd5b2dee3facbb4701a
+      template: ssl_exporter
+      name: ssl_exporter
+      description: |
+        task #2097
+        https://github.com/ribbybibby/ssl_exporter
+      groups:
+        - name: Templates
+      items:
+        - uuid: e5d41a82203a4732b8bfeec7e6d16847
+          name: ssl_exporter.raw
+          type: HTTP_AGENT
+          key: ssl_exporter.raw
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          url: '{$SSL_EXPORTER_SCHEMA}://{HOST.CONN}:{$SSL_EXPORTER_PORT}/probe?{$SSL_EXPORTER_PROBE}'
+          tags:
+            - tag: component
+              value: raw
+            - tag: component
+              value: ssl_exporter
+        - uuid: 2f27c963c36743e4b68e38755dfe8b24
+          name: ssl_exporter.raw.json
+          type: DEPENDENT
+          key: ssl_exporter.raw.json
+          delay: '0'
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          preprocessing:
+            - type: PROMETHEUS_TO_JSON
+              parameters:
+                - ''
+              error_handler: CUSTOM_ERROR
+              error_handler_params: n/a
+          master_item:
+            key: ssl_exporter.raw
+          tags:
+            - tag: component
+              value: raw
+            - tag: component
+              value: ssl_exporter
+      discovery_rules:
+        - uuid: d756ecbb3732425990039f3c6e831b54
+          name: 'ssl_file_cert_not_after discovery'
+          type: DEPENDENT
+          key: ssl_exporter.ssl_file_cert_not_after
+          delay: '0'
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: '{#CN}'
+                operator: EXISTS
+                formulaid: A
+              - macro: '{#DNSNAMES}'
+                value: .+
+                formulaid: B
+              - macro: '{#FILE}'
+                operator: EXISTS
+                formulaid: C
+              - macro: '{#METRIC}'
+                value: ^ssl_file_cert_not_after$
+                formulaid: D
+          lifetime: 3d
+          enabled_lifetime_type: DISABLE_AFTER
+          enabled_lifetime: 1h
+          item_prototypes:
+            - uuid: 00666456fa944b62b9a6ea01eee3deb2
+              name: '{#METRIC} {#CN} ({#FILE})'
+              type: DEPENDENT
+              key: 'ssl_exporter.[{#METRIC},{#CN},{#FILE}]'
+              delay: '0'
+              history: 12h
+              trends: '0'
+              units: unixtime
+              preprocessing:
+                - type: PROMETHEUS_PATTERN
+                  parameters:
+                    - '{#METRIC}{serial_no="{#SERIAL_NO}",dnsnames=~".+"}'
+                    - value
+                    - ''
+              master_item:
+                key: ssl_exporter.raw
+              tags:
+                - tag: component
+                  value: ssl_exporter
+              trigger_prototypes:
+                - uuid: 5da4cefeef824b89ba867282c357e1f0
+                  expression: '(last(/ssl_exporter/ssl_exporter.[{#METRIC},{#CN},{#FILE}])-now())<0'
+                  name: '{#METRIC} {#CN} ({#FILE}) is expired'
+                  event_name: '{#CN} is expired: "{ITEM.LASTVALUE1}"'
+                  opdata: '"{#FILE}"; serial_no: {#SERIAL_NO}; {#METRIC}'
+                  priority: HIGH
+                  tags:
+                    - tag: scope
+                      value: ssl_exporter
+                - uuid: 023c3960d82f4891abf88fabb715898e
+                  expression: '(last(/ssl_exporter/ssl_exporter.[{#METRIC},{#CN},{#FILE}])-now())<{$SSL_EXPORTER_CRTTTL}'
+                  name: '{#METRIC} {#CN} ({#FILE}) TTL'
+                  event_name: '{#CN} is expiring soon: "{ITEM.LASTVALUE1}"'
+                  opdata: '"{#FILE}"; serial_no: {#SERIAL_NO}; {#METRIC}'
+                  priority: WARNING
+                  dependencies:
+                    - name: '{#METRIC} {#CN} ({#FILE}) is expired'
+                      expression: '(last(/ssl_exporter/ssl_exporter.[{#METRIC},{#CN},{#FILE}])-now())<0'
+                  tags:
+                    - tag: scope
+                      value: ssl_exporter
+          master_item:
+            key: ssl_exporter.raw.json
+          lld_macro_paths:
+            - lld_macro: '{#CN}'
+              path: '$.labels[''cn'']'
+            - lld_macro: '{#DNSNAMES}'
+              path: '$.labels[''dnsnames'']'
+            - lld_macro: '{#FILE}'
+              path: '$.labels[''file'']'
+            - lld_macro: '{#METRIC}'
+              path: '$[''name'']'
+            - lld_macro: '{#SERIAL_NO}'
+              path: '$.labels[''serial_no'']'
+      tags:
+        - tag: class
+          value: ssl_exporter
+      macros:
+        - macro: '{$SSL_EXPORTER_CRTTTL}'
+          value: 7d
+        - macro: '{$SSL_EXPORTER_PORT}'
+          value: '9219'
+        - macro: '{$SSL_EXPORTER_PROBE}'
+          value: 'module=file&target=/srv/ssl/le/*.pem'
+        - macro: '{$SSL_EXPORTER_SCHEMA}'
+          value: HTTP
